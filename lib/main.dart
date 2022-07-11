@@ -23,7 +23,7 @@ void main() async {
   //deleteDocument();
   runApp(MaterialApp(
     // home: const MyApp(),
-    theme: ThemeData(fontFamily: GoogleFonts.roboto().fontFamily),
+    theme: ThemeData(fontFamily: GoogleFonts.lato().fontFamily),
     debugShowCheckedModeBanner: false,
     onGenerateRoute: Routes.onGenerateRoute,
     initialRoute:

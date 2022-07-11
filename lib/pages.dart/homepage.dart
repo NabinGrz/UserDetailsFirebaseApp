@@ -1,9 +1,11 @@
-import 'dart:developer';
-
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:learningfirebase/utils/colors.dart';
+import 'package:uuid/uuid.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({Key? key}) : super(key: key);
@@ -14,37 +16,120 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   bool isUserAdded = false;
+  File? image;
   final TextEditingController nameController = TextEditingController();
   final TextEditingController emailController = TextEditingController();
+  final TextEditingController ageController = TextEditingController();
   final FirebaseFirestore _firebaseFirestore = FirebaseFirestore.instance;
+  double progressValue = 0;
+  Future<String> uploadFile() async {
+    final storageRef = FirebaseStorage.instance.ref();
+    final imageRef = storageRef.child("ProfilePictures");
+    final fullImageRef = imageRef.child("${const Uuid().v1()}-IMG");
+
+    //UPLOADING FILE
+    UploadTask uploadTask = fullImageRef.putFile(image!);
+
+    uploadTask.snapshotEvents.listen((snapshot) {
+      double percentage = snapshot.bytesTransferred / snapshot.totalBytes * 100;
+      // log(percentage.toString());
+      setState(() {
+        progressValue = percentage;
+      });
+    });
+    TaskSnapshot taskSnapshot = await uploadTask;
+
+    //GETTING FILE URL/PATH TO PASS
+    String downloadUrl = await taskSnapshot.ref.getDownloadURL();
+    return downloadUrl;
+  }
+
   void createUser() async {
     String name = nameController.text.trim();
     String email = emailController.text.trim();
+    int age = int.parse(ageController.text.trim());
+    //FOR CREATING DOWNLOADING URL
 
-    Map<String, dynamic> user = {"name": name, "email": email};
+    Map<String, dynamic> user = {
+      "name": name,
+      "email": email,
+      "age": age,
+      "profilepic": await uploadFile() //GIVING PATH NAME
+    };
     await _firebaseFirestore.collection("users").add(user);
     setState(() {
       isUserAdded = false;
+      setState(() {
+        progressValue = 0;
+      });
+      //image = null;
     });
 
-    log("USER CREATED");
+    //
+    // nameController.clear();
+    // emailController.clear();
+    // ageController.clear();
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text(
+        "User Created Successfully!!",
+      ),
+      backgroundColor: Colors.green,
+    ));
+    // log("USER CREATED");
   }
 
   void deleteDocument(String docID) async {
     await _firebaseFirestore.collection("users").doc(docID).delete();
-    log("DELETED");
+    // log("DELETED");
   }
 
   @override
   Widget build(BuildContext context) {
     print("BUILD WIDGET");
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text("Home"),
       ),
       body: SafeArea(
         child: Column(
           children: [
+            const SizedBox(
+              height: 15,
+            ),
+            StatefulBuilder(
+                // stream: null,
+                builder: (context, myState) {
+              return CupertinoButton(
+                onPressed: () async {
+                  XFile? ximage = await ImagePicker()
+                      .pickImage(source: ImageSource.gallery);
+                  if (ximage != null) {
+                    File? selectedImage = File(ximage.path);
+                    myState(() {
+                      image = selectedImage;
+                    });
+                  }
+                },
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    CircleAvatar(
+                      radius: 50,
+                      backgroundColor: Colors.grey,
+                      backgroundImage:
+                          (image != null) ? FileImage(image!) : null,
+                    ),
+                    (progressValue != 0.0)
+                        ? CircularProgressIndicator(
+                            value: progressValue,
+                            color: Colors.white,
+                          )
+                        : Container()
+                  ],
+                ),
+              );
+            }),
             const SizedBox(
               height: 15,
             ),
@@ -76,6 +161,20 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              child: TextField(
+                controller: ageController,
+                onChanged: (value) {},
+                keyboardType: TextInputType.number,
+                style: const TextStyle(fontSize: 20, color: Colors.black),
+                decoration: const InputDecoration(
+                  filled: true,
+                  fillColor: accentColor,
+                  hintText: 'Age',
+                ),
+              ),
+            ),
             const SizedBox(
               height: 10,
             ),
@@ -87,23 +186,23 @@ class _HomePageState extends State<HomePage> {
                 child: StatefulBuilder(
                   builder: (context, myState) {
                     return ElevatedButton(
-                      style: ButtonStyle(
-                          elevation: MaterialStateProperty.all(0),
-                          alignment: Alignment.center,
-                          padding: MaterialStateProperty.all(
-                              const EdgeInsets.only(
-                                  right: 75, left: 75, top: 15, bottom: 15)),
-                          backgroundColor:
-                              MaterialStateProperty.all(Colors.transparent),
-                          shape: MaterialStateProperty.all(
-                            RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(20)),
-                          )),
+                      style: ElevatedButton.styleFrom(
+                        fixedSize: const Size(200, 60),
+                        elevation: 10,
+                        primary: primaryColor,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20)),
+                      ),
                       onPressed: () {
-                        myState(() {
-                          isUserAdded = true;
-                        });
-                        createUser();
+                        if (nameController.text.trim().isNotEmpty &&
+                            emailController.text.trim().isNotEmpty &&
+                            ageController.text.trim().toString().isNotEmpty &&
+                            image != null) {
+                          myState(() {
+                            isUserAdded = true;
+                          });
+                          createUser();
+                        }
                       },
                       child: isUserAdded
                           ? const CircularProgressIndicator(
@@ -126,19 +225,26 @@ class _HomePageState extends State<HomePage> {
             ),
             Expanded(
                 child: StreamBuilder<QuerySnapshot>(
-                    stream: _firebaseFirestore.collection("users").snapshots(),
+                    stream: _firebaseFirestore
+                        .collection("users")
+                        .orderBy("age", descending: false)
+
+                        /// .where("age", isEqualTo: 18)
+                        .snapshots(),
                     builder: (context, snapshot) {
                       if (snapshot.hasData && snapshot.data != null) {
                         List<QueryDocumentSnapshot<Object?>> userData =
                             snapshot.data!.docs;
 
                         return ListView.builder(
+                          physics: const BouncingScrollPhysics(
+                              parent: AlwaysScrollableScrollPhysics()),
                           itemCount: userData.length,
                           itemBuilder: (context, index) {
                             return ListTile(
-                              title: Text(userData[index]["name"].toString()),
-                              subtitle:
-                                  Text(userData[index]["email"].toString()),
+                              title: Text(userData[index]["name"] +
+                                  " (${userData[index]["age"]})"),
+                              subtitle: Text(userData[index]["email"]),
                               trailing: IconButton(
                                   onPressed: () {
                                     deleteDocument(
@@ -153,7 +259,7 @@ class _HomePageState extends State<HomePage> {
                           },
                         );
                       } else {
-                        log("HAS NO DATA");
+                        // log("HAS NO DATA");
                         return const Center(
                           child: Text(
                             "No Data Found",
